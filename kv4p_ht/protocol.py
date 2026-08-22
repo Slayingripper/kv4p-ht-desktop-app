@@ -51,6 +51,28 @@ FEAT_HAS_ESP32_AFSK = 1 << 2
 
 # ── Struct helpers ───────────────────────────────────────────────
 
+# Standard 38-tone CTCSS table, matching the kv4p-ht Android app's ToneHelper.
+# The firmware GROUP command carries a tone *index* into this table (0 = none),
+# not the tone value itself.
+CTCSS_TONES = (
+    67.0, 71.9, 74.4, 77.0, 79.7, 82.5, 85.4, 88.5,
+    91.5, 94.8, 97.4, 100.0, 103.5, 107.2, 110.9, 114.8,
+    118.8, 123.0, 127.3, 131.8, 136.5, 141.3, 146.2, 151.4,
+    156.7, 162.2, 167.9, 173.8, 179.9, 186.2, 192.8, 203.5,
+    210.7, 218.1, 225.7, 233.6, 241.8, 250.3,
+)
+
+
+def ctcss_to_index(tenths: int) -> int:
+    """Convert a CTCSS tone in tenths of Hz (e.g. 885 == 88.5 Hz; 0 == none)
+    to its wire-format index in CTCSS_TONES (1-based; 0 == none)."""
+    if not tenths or tenths <= 0:
+        return 0
+    hz = tenths / 10.0
+    idx = min(range(len(CTCSS_TONES)), key=lambda i: abs(CTCSS_TONES[i] - hz))
+    return idx + 1 if abs(CTCSS_TONES[idx] - hz) <= 1.0 else 0
+
+
 def pack_group(bw: int, freq_tx: float, freq_rx: float,
                ctcss_tx: int, squelch: int, ctcss_rx: int) -> bytes:
     return struct.pack('<BffBBB', bw, freq_tx, freq_rx,

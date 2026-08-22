@@ -6,6 +6,8 @@ import struct
 import pytest
 
 from kv4p_ht.protocol import (
+    CTCSS_TONES,
+    ctcss_to_index,
     DELIMITER,
     FEAT_HAS_ESP32_AFSK,
     FEAT_HAS_HL,
@@ -529,3 +531,37 @@ class TestFrameParser:
             DELIMITER + bytes([HostCmd.STOP]) + struct.pack('<H', 0)
         )
         assert collected == expected
+
+
+class TestCtcssToIndex:
+    """The firmware GROUP command carries a tone-table index (0=none), not the
+    tone value. Regression: sending tenths (e.g. 885) overflowed struct 'B'."""
+
+    def test_none_is_zero(self):
+        assert ctcss_to_index(0) == 0
+        assert ctcss_to_index(-5) == 0
+
+    def test_known_tones(self):
+        # Index 1..38 follow CTCSS_TONES order
+        assert ctcss_to_index(670) == 1    # 67.0 Hz
+        assert ctcss_to_index(885) == 8    # 88.5 Hz
+        assert ctcss_to_index(1000) == 12  # 100.0 Hz
+        assert ctcss_to_index(2503) == len(CTCSS_TONES)
+
+    def test_result_fits_byte(self):
+        for t in range(0, 2600, 10):
+            assert 0 <= ctcss_to_index(t) <= 255
+
+    def test_unknown_tone_maps_to_nearest_within_1hz(self):
+        assert ctcss_to_index(884) == ctcss_to_index(885)
+        assert ctcss_to_index(999) == ctcss_to_index(1000)
+
+
+class TestPackGroupCtcssIndex:
+    def test_packed_with_real_tone_values(self):
+        idx_tx = ctcss_to_index(885)
+        idx_rx = ctcss_to_index(2035)
+        data = pack_group(0, 146.520, 146.520, idx_tx, 3, idx_rx)
+        bw, ftx, frx, ctx, sq, crx = struct.unpack('<BffBBB', data)
+        assert ctx == 8
+        assert crx == CTCSS_TONES.index(203.5) + 1

@@ -24,3 +24,6 @@ htmlcov/
 *.swp
 *.lck
 ~*
+
+# ── Agent / AI assistant files ──────────────────────────────
+AGENTS.md

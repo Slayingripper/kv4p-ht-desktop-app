@@ -56,7 +56,9 @@ from .ax25_file_transfer import (
 from .hamlib import RigCtlD
 from .kiss import KissTnc
 from .morse import MorseDecoder, MorseKeyer, PracticeGenerator
-from .protocol import DELIMITER, FrameSender, rssi_to_s_meter
+from .protocol import (
+    DELIMITER, FrameSender, rssi_to_s_meter, CTCSS_TONES, ctcss_to_index,
+)
 from .radio import AudioWorker, SerialWorker
 from .scanner import BandPlan, FrequencyScanner
 from .spectrum import SpectrumAnalyzer, WaterfallBuffer
@@ -86,13 +88,7 @@ def _hex_dump(data: bytes, max_bytes: int = 64) -> str:
         parts.append(f"  ... ({len(data)} bytes total)")
     return '\n'.join(parts)
 
-CTCSS_TONES = [
-    67.0, 71.9, 74.4, 77.0, 79.7, 82.5, 85.4, 88.5, 91.5, 94.8,
-    97.4, 100.0, 103.5, 107.2, 110.9, 114.8, 118.8, 123.0, 127.3,
-    131.8, 136.5, 141.3, 146.2, 151.4, 156.7, 162.2, 167.9, 173.8,
-    179.9, 186.2, 192.8, 199.5, 206.5, 210.7, 218.1, 225.7, 233.6,
-    241.8, 250.3,
-]
+CTCSS_TONES = list(CTCSS_TONES)
 
 RADIO_MODES = ['FM']
 
@@ -111,6 +107,33 @@ class _FtSignals(QObject):
     log_msg = pyqtSignal(str)
     progress = pyqtSignal(int, int)
     complete = pyqtSignal(bool, str)
+
+
+class _AprsSignals(QObject):
+    """Thread-safe signal bridge for callbacks from non-GUI threads (IGate, KISS TNC)."""
+    is_line = pyqtSignal(str)
+    rf_tx = pyqtSignal(bytes, bool)
+    kiss_frame = pyqtSignal(bytes)
+
+
+class _UdpSignals(QObject):
+    """Thread-safe signal bridge for UDP broadcast listener callbacks."""
+    log_line = pyqtSignal(str)
+    wsjt = pyqtSignal(object)
+    direwolf = pyqtSignal(object)
+    fldigi = pyqtSignal(object)
+
+
+class _ScanSignals(QObject):
+    """Thread-safe signal bridge for scanner, RF-sweeper and rigctld callbacks."""
+    scan_set_freq = pyqtSignal(float)
+    scan_on_signal = pyqtSignal(float, float)
+    sweep_set_freq = pyqtSignal(float)
+    sweep_log = pyqtSignal(str)
+    sweep_complete = pyqtSignal(object, object)
+    sweep_progress = pyqtSignal(int, int)
+    rig_freq = pyqtSignal(float)
+    rig_ptt = pyqtSignal(bool)
 
 
 class TxWorker(QThread):
@@ -255,6 +278,30 @@ class MainWindow(QMainWindow):
         self._ft_sig.complete.connect(self._ft_complete_ui)
         self._file_sender: FileTransferSender | None = None
         self._file_receiver: FileTransferReceiver | None = None
+
+        # ── APRS / digital-modes thread bridges ──────────────────
+        # IGate/KISS/UDP callbacks arrive on foreign threads; marshal to GUI thread.
+        self._aprs_sig = _AprsSignals()
+        self._aprs_sig.is_line.connect(self._on_aprs_is)
+        self._aprs_sig.rf_tx.connect(self._rf_tx_callback)
+        self._aprs_sig.kiss_frame.connect(self._on_kiss_ax25)
+
+        self._udp_sig = _UdpSignals()
+        self._udp_sig.log_line.connect(self._on_udp_log)
+        self._udp_sig.wsjt.connect(self._on_wsjtx_packet)
+        self._udp_sig.direwolf.connect(self._on_direwolf_packet)
+        self._udp_sig.fldigi.connect(self._on_fldigi_packet)
+
+        # Scanner / RF sweeper / rigctld callbacks arrive on foreign threads.
+        self._scan_sig = _ScanSignals()
+        self._scan_sig.scan_set_freq.connect(self._scan_set_freq)
+        self._scan_sig.scan_on_signal.connect(self._scan_on_signal)
+        self._scan_sig.sweep_set_freq.connect(self._rf_sweep_set_freq)
+        self._scan_sig.sweep_log.connect(self.log)
+        self._scan_sig.sweep_complete.connect(self._on_rf_sweep_complete)
+        self._scan_sig.sweep_progress.connect(self._on_rf_sweep_progress)
+        self._scan_sig.rig_freq.connect(self._on_rigctld_freq)
+        self._scan_sig.rig_ptt.connect(self._on_rigctld_ptt)
 
         # ── TX worker ───────────────────────────────────────────
         self._tx_worker: TxWorker | None = None
@@ -622,13 +669,13 @@ class MainWindow(QMainWindow):
         right_l = QVBoxLayout(right)
 
         for label_text, attr, widget_type, extra in [
-            ("Name:", "ch_name_edit", "line", {}),
-            ("Freq RX (MHz):", "ch_freq_edit", "line", {}),
-            ("Offset (MHz):", "ch_offset_edit", "line", {}),
-            ("Mode:", "ch_mode_combo", "combo", {"items": ["FM"]}),
-            ("CTCSS TX:", "ch_ctcss_tx_combo", "ctcss", {}),
-            ("CTCSS RX:", "ch_ctcss_rx_combo", "ctcss", {}),
-            ("Notes:", "ch_notes_edit", "line", {}),
+            ("Name:", "_ch_name_edit", "line", {}),
+            ("Freq RX (MHz):", "_ch_freq_edit", "line", {}),
+            ("Offset (MHz):", "_ch_offset_edit", "line", {}),
+            ("Mode:", "_ch_mode_combo", "combo", {"items": ["FM"]}),
+            ("CTCSS TX:", "_ch_ctcss_tx_combo", "ctcss", {}),
+            ("CTCSS RX:", "_ch_ctcss_rx_combo", "ctcss", {}),
+            ("Notes:", "_ch_notes_edit", "line", {}),
         ]:
             row = QHBoxLayout()
             lbl = QLabel(label_text)
@@ -1910,7 +1957,8 @@ class MainWindow(QMainWindow):
         if self._serial:
             from .protocol import pack_group
             payload = pack_group(self.bandwidth, self.freq_tx, self.freq_rx,
-                                 self.ctcss_tx, self.squelch, self.ctcss_rx)
+                                 ctcss_to_index(self.ctcss_tx), self.squelch,
+                                 ctcss_to_index(self.ctcss_rx))
             self._send_frame(0x03, payload, f"GROUP freq_tx={self.freq_tx:.3f}")
 
     def _toggle_ptt(self):
@@ -2058,15 +2106,21 @@ class MainWindow(QMainWindow):
 
     # ── RF Sweep ───────────────────────────────────────────────
 
+    def _make_rf_sweeper(self) -> RfSweeper:
+        sweeper = RfSweeper(
+            set_freq_callback=self._scan_sig.sweep_set_freq.emit,
+            log_fn=self._scan_sig.sweep_log.emit,
+        )
+        sweeper.on_sweep_complete = (
+            lambda f, r: self._scan_sig.sweep_complete.emit(f, r))
+        sweeper.on_sweep_progress = (
+            lambda c, t: self._scan_sig.sweep_progress.emit(int(c), int(t)))
+        return sweeper
+
     def _on_rf_sweep_toggled(self, on: bool):
         self._rf_sweep_mode = on
         if on and self._rf_sweeper is None:
-            self._rf_sweeper = RfSweeper(
-                set_freq_callback=self._rf_sweep_set_freq,
-                log_fn=lambda m: self.log(m),
-            )
-            self._rf_sweeper.on_sweep_complete = self._on_rf_sweep_complete
-            self._rf_sweeper.on_sweep_progress = self._on_rf_sweep_progress
+            self._rf_sweeper = self._make_rf_sweeper()
         elif not on:
             if self._rf_sweeper and self._rf_sweeper.is_sweeping:
                 self._rf_sweeper.stop()
@@ -2082,12 +2136,7 @@ class MainWindow(QMainWindow):
             self.log("Board not connected — cannot sweep RF")
             return
         if self._rf_sweeper is None:
-            self._rf_sweeper = RfSweeper(
-                set_freq_callback=self._rf_sweep_set_freq,
-                log_fn=lambda m: self.log(m),
-            )
-            self._rf_sweeper.on_sweep_complete = self._on_rf_sweep_complete
-            self._rf_sweeper.on_sweep_progress = self._on_rf_sweep_progress
+            self._rf_sweeper = self._make_rf_sweeper()
         sweeper = self._rf_sweeper
         sweeper.start_mhz = self._spectrum_controls.sweep_start_mhz
         sweeper.stop_mhz = self._spectrum_controls.sweep_stop_mhz
@@ -2112,7 +2161,8 @@ class MainWindow(QMainWindow):
         freq_tx = freq_mhz + self.offset
         from .protocol import pack_group
         payload = pack_group(0, freq_tx, freq_rx,
-                             self.ctcss_tx, self.squelch, self.ctcss_rx)
+                             ctcss_to_index(self.ctcss_tx), self.squelch,
+                             ctcss_to_index(self.ctcss_rx))
         self._send_frame(0x03, payload, f"RF_SWEEP freq={freq_mhz:.3f}")
 
     def _on_rf_sweep_complete(self, freq_axis, rssi_values):
@@ -2138,9 +2188,9 @@ class MainWindow(QMainWindow):
             self._rigctld = RigCtlD(
                 host,
                 port,
-                freq_callback=self._on_rigctld_freq,
-                ptt_callback=lambda on: self._on_rigctld_ptt(on),
-                log_fn=lambda m: self.log(f"[RIGCTLD] {m}"),
+                freq_callback=self._scan_sig.rig_freq.emit,
+                ptt_callback=lambda on: self._scan_sig.rig_ptt.emit(bool(on)),
+                log_fn=lambda m: self._scan_sig.sweep_log.emit(f"[RIGCTLD] {m}"),
             )
             if self._rigctld.connect():
                 self._rigctl_btn.setText("Connected")
@@ -2195,7 +2245,7 @@ class MainWindow(QMainWindow):
             host = self._kiss_host.text().strip() or "localhost"
             port = int(self._kiss_port.text().strip() or "8001")
             self._kiss_tnc = KissTnc(host=host, tcp_port=port,
-                                     callback=self._on_kiss_ax25,
+                                     callback=self._aprs_sig.kiss_frame.emit,
                                      log_fn=lambda m: self.log(f"[KISS] {m}"))
             if self._kiss_tnc.connect():
                 self._kiss_tnc.start()
@@ -2229,10 +2279,10 @@ class MainWindow(QMainWindow):
 
     def _toggle_udp(self, on: bool):
         if on:
-            self._udp_rx = UdpBroadcastRx(log_fn=lambda m: self.log(f"[UDP] {m}"))
-            self._udp_rx.set_callback('wsjt-x', self._on_wsjtx_packet)
-            self._udp_rx.set_callback('direwolf', self._on_direwolf_packet)
-            self._udp_rx.set_callback('fldigi', self._on_fldigi_packet)
+            self._udp_rx = UdpBroadcastRx(log_fn=self._udp_sig.log_line.emit)
+            self._udp_rx.set_callback('wsjt-x', self._udp_sig.wsjt.emit)
+            self._udp_rx.set_callback('direwolf', self._udp_sig.direwolf.emit)
+            self._udp_rx.set_callback('fldigi', self._udp_sig.fldigi.emit)
             self._udp_rx.start()
             self.log("UDP broadcast listener started")
             self._digital_status.setText("UDP listener active")
@@ -2241,6 +2291,9 @@ class MainWindow(QMainWindow):
                 self._udp_rx.stop()
                 self._udp_rx = None
             self.log("UDP broadcast listener stopped")
+
+    def _on_udp_log(self, msg: str):
+        self.log(f"[UDP] {msg}")
 
     def _on_wsjtx_packet(self, pkt: dict):
         ptype = pkt.get('type', 0)
@@ -2281,8 +2334,8 @@ class MainWindow(QMainWindow):
                 return
             dwell = self._scan_dwell.value()
             self._scanner = FrequencyScanner(
-                set_freq_callback=self._scan_set_freq,
-                on_signal_callback=self._scan_on_signal,
+                set_freq_callback=self._scan_sig.scan_set_freq.emit,
+                on_signal_callback=self._scan_sig.scan_on_signal.emit,
             )
             self._scanner.start_scan(freqs, dwell_ms=dwell)
             self.scanning = True
@@ -2605,8 +2658,8 @@ class MainWindow(QMainWindow):
         if on:
             self._igate = IGate(
                 self.callsign,
-                rf_tx_callback=self._rf_tx_callback,
-                aprs_is_callback=lambda m: self._on_aprs_is(m),
+                rf_tx_callback=self._emit_rf_tx,
+                aprs_is_callback=self._aprs_sig.is_line.emit,
                 lat=self.aprs_lat, lon=self.aprs_lon,
                 filter_str=self._igate_filter.text().strip(),
                 tx_enabled=self._igate_tx.isChecked(),
@@ -2680,6 +2733,10 @@ class MainWindow(QMainWindow):
         waveform = build_tx_waveform(source, dest, digipeaters, info)
         self._tx_afsk_waveform(waveform)
         self.log(f"APRS TX {source}->{dest} via {','.join(digipeaters) if digipeaters else 'direct'}")
+
+    def _emit_rf_tx(self, ax25_body: bytes, from_igate: bool = False):
+        """Called from the IGate thread — forward to GUI thread via signal."""
+        self._aprs_sig.rf_tx.emit(bytes(ax25_body), bool(from_igate))
 
     def _rf_tx_callback(self, ax25_body: bytes, from_igate: bool = False):
         if not self._serial:

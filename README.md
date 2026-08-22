@@ -2,7 +2,7 @@
 
 Desktop companion app for the [kv4p-ht](https://kv4p.com) open-source ham radio board (ESP32 + SA818).
 
-KV4P-Desktop turns a kv4p-ht board into a full-featured desktop FM transceiver with APRS, spectrum analysis, SSTV, Morse/CW, digital modes, and file transfer — all over a single USB cable.
+KV4P-Desktop turns a kv4p-ht board into a full-featured desktop transceiver with FM voice, APRS, RF spectrum analysis, SSTV, Morse/CW, digital modes integration, file transfer, and scanning — all over a single USB cable.
 
 ## Features
 
@@ -11,55 +11,66 @@ KV4P-Desktop turns a kv4p-ht board into a full-featured desktop FM transceiver w
 - **PTT Control** — Software PTT button, physical PTT sync, and rigctld PTT from external apps
 - **CTCSS Tones** — Transmit/receive CTCSS (PL tones) with full tone table
 - **Squelch** — Adjustable squelch level (0–8)
-- **Channel Memory** — Save/recall frequencies with name, offset, CTCSS, and notes. Import/export CSV
-- **Frequency Scanner** — Scan 2m/70cm bands with dwell time and signal detection
+- **Channel Memory** — Save/recall frequencies with name, offset, CTCSS, mode, and notes. Import/export CSV
 - **Repeater Offset** — Configurable TX offset (+/– MHz)
+- **Analog S-Meter** — Needle-style S-meter with color-coded segments
+- **Radio Faceplate** — LCD-style frequency display and channel knob, toggleable with the desktop view
 
 ### APRS
-- **iGate** — Bidirectional gateway between RF and APRS-IS (internet), with packet filtering
+- **iGate** — Bidirectional gateway between RF and APRS-IS (internet), with packet filtering and live stats
 - **Digipeater** — Automatic packet forwarding with WIDEn-N path handling
 - **Messaging** — Send/receive APRS text messages with automatic ACK
 - **Beacon** — Periodic position beaconing with configurable interval and path
-- **Position Display** — Decode and display position reports on the map
+- **Position Display** — Decode and display position reports from received packets
+- **Packet Log** — Live APRS packet viewer
 
 ### Spectrum Analysis
-- **Audio FFT** — Real-time FFT of audio path (configurable FFT size, window, averaging)
-- **RF Sweep** — Swept spectrum analyzer: hops through a frequency range, reads RSSI at each step, plots power vs frequency. Default: 2m band (144–148 MHz), 25 kHz steps, ~4 sec sweep
+- **Audio FFT** — Real-time FFT of the audio path (configurable size, window, averaging)
+- **RF Sweep** — Swept spectrum analyzer: hops through a frequency range reading RSSI at each step and plots power vs frequency. Default: 2m band (144–148 MHz), 25 kHz steps, ~4 s sweep
 - **Waterfall Display** — Scrolling waterfall with color intensity mapping
 - **Click-to-Tune** — Click the spectrum to jump to a frequency
 
+### Digital Modes Integration
+Drive the kv4p-ht from established digital-mode software — the app provides the modem glue:
+
+| Software | Modes | Interface |
+|----------|-------|-----------|
+| WSJT-X / JTDX | FT8, FT4, JT65, JT9, WSPR, MSK144 | UDP broadcast |
+| FLDigi | RTTY, PSK31/64/125, Olivia, Contestia, MT63, Thor, DominoEX, CW | UDP broadcast |
+| JS8Call | JS8 QRP messaging | UDP broadcast |
+| Dire Wolf / BPQ | APRS, packet radio, AX.25 | KISS TNC (TCP 8001) |
+| Pat (Winlink) | Email over radio | KISS TNC |
+| Any Hamlib app | CAT control | rigctld (TCP 4532) |
+
+- **Hamlib/RigCtlD Server** — External apps set frequency, key PTT, and switch mode (FM/USB/LSB/AM/CW)
+- **KISS TNC Server** — Standard AX.25 access for packet stacks
+
 ### SSTV
-- **Encode** — Convert images to SSTV audio (Martin M1/M2, Scottie S1/S2, PD-90/120, Robot 36, and more)
-- **Decode** — Decode incoming SSTV transmissions with automatic mode detection and image preview
+- **Encode** — Convert images to SSTV audio: Martin M1–M4, Scottie S1–S4/DX, PD-50/90/120, Robot 36
+- **Decode** — Decode incoming SSTV transmissions with automatic VIS-code mode detection and image preview
 
 ### Morse / CW
 - **CW Keyer** — Iambic and straight keyer with adjustable WPM
 - **Morse Decoder** — Real-time decode of incoming Morse code
-- **Practice Mode** — Random callsign/text generation for Morse practice
-
-### Digital Modes Integration
-- **KISS TNC** — Dire Wolf / BPQ AX.25 interface over TCP (port 8001)
-- **UDP Broadcast** — Receive spots from WSJT-X, FLDigi, JS8Call, Dire Wolf
-- **Hamlib/RigCtlD** — Sync frequency and PTT with external radio apps via rigctld (TCP/4532)
+- **Practice Mode** — Random callsign/text generation for Morse training
 
 ### File Transfer
 - **AX.25 File Transfer** — Send and receive files over AX.25 with packet sequencing, ACK/NAK, CRC-16 verification, and automatic retry
 
-### Radio Faceplate
-- **Analog S-Meter** — Needle-style S-meter with color-coded segments
-- **LCD Frequency Display** — Large green-on-black frequency readout
-- **Channel Knob** — Quick channel selection from the faceplate view
-- Toggle between desktop and radio-face modes
+### Scanner
+- **Band Plans** — Built-in 2m (144–148 MHz) and 70cm (420–450 MHz) plans with calling-frequency presets
+- **Signal Detection** — Dwell time and RSSI threshold-based stop-and-hold scanning
 
 ### General
 - **Persistent Settings** — Callsign, frequencies, and preferences saved across sessions
 - **Audio Controls** — Mic gain and speaker volume sliders
+- **Event Log** — Timestamped application log
 - **Debug Console** — Full TX/RX frame hex dump and protocol logging
 - **Self-Test** — Built-in AFSK demodulator test
 
 ## Requirements
 
-- Python 3.10+
+- Python 3.11+
 - A kv4p-ht board connected via USB
 - Linux, macOS, or Windows with audio drivers
 - System packages: `portaudio19-dev`, `libopus0` (Linux)
@@ -101,12 +112,19 @@ python run.py --help
 | `--scanner` | Start frequency scanner on launch |
 | `--log-level LEVEL` | Log level (debug/info/warn/error) |
 
+## UI Layout
+
+Main tabs: **Radio · Channels · Spectrum · APRS · Digital Modes · SSTV · Morse/CW · File Transfer · Scanner · Settings · Debug**
+
+Bottom dock tabs: **Event Log · APRS Packets · iGate Stats**
+
 ## Architecture
 
 ```
 ┌──────────────────────────────────────────────────────────┐
 │              PyQt6 GUI (MainWindow)                       │
-│  Radio | Channels | Spectrum | APRS | SSTV | CW | FT     │
+│ Radio | Channels | Spectrum | APRS | Digital | SSTV      │
+│        CW | File Transfer | Scanner | Settings | Debug   │
 └──────┬─────────────────────────────────────────┬─────────┘
        │ QThread signals                         │ queues
        ▼                                         ▼
@@ -115,7 +133,7 @@ python run.py --help
 │ USB serial   │                        │ mic/speaker  │
 │ FrameParser  │                        │ Opus + AFSK  │
 └──────┬───────┘                        └──────────────┘
-       │ USB (115200 baud)
+       │ USB serial
        ▼
 ┌──────────────┐
 │ kv4p-ht      │
@@ -123,9 +141,9 @@ python run.py --help
 └──────────────┘
 
 External Integrations:
-  hamlib/rigctld ── TCP/4532 ──> RigCtlD
+  Hamlib apps    ── TCP/4532 ──> RigCtlD (freq/PTT/mode)
   Dire Wolf/BPQ  ── TCP/8001 ──> KissTnc
-  WSJT-X/FLD/DW  ── UDP ──────> UdpBroadcastRx
+  WSJT-X/FLDigi  ── UDP      ──> UdpBroadcastRx
 ```
 
 ## Protocol
