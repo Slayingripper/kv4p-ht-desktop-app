@@ -4,6 +4,52 @@ Desktop companion app for the [kv4p-ht](https://kv4p.com) open-source ham radio 
 
 KV4P-Desktop turns a kv4p-ht board into a full-featured desktop transceiver with FM voice, APRS, RF spectrum analysis, SSTV, Morse/CW, digital modes integration, file transfer, and scanning — all over a single USB cable.
 
+## Screenshots
+
+### Radio
+
+![KV4P-Desktop Radio controls](screenshots/radio.png)
+
+### Channels
+
+![KV4P-Desktop channel management](screenshots/channels.png)
+
+### Spectrum
+
+![KV4P-Desktop spectrum and waterfall](screenshots/spectrum.png)
+
+### APRS
+
+![KV4P-Desktop APRS controls](screenshots/aprs.png)
+
+### Digital Modes
+
+![KV4P-Desktop digital mode integrations](screenshots/digital-modes.png)
+
+### SSTV
+
+![KV4P-Desktop SSTV controls](screenshots/sstv.png)
+
+### Morse / CW
+
+![KV4P-Desktop Morse and CW controls](screenshots/morse-cw.png)
+
+### File Transfer
+
+![KV4P-Desktop AX.25 file transfer](screenshots/file-transfer.png)
+
+### Scanner
+
+![KV4P-Desktop frequency scanner](screenshots/scanner.png)
+
+### Settings
+
+![KV4P-Desktop application settings](screenshots/settings.png)
+
+### Debug
+
+![KV4P-Desktop frame diagnostics](screenshots/debug.png)
+
 ## Features
 
 ### Radio

@@ -1709,20 +1709,76 @@ class MainWindow(QMainWindow):
 
         g = QGroupBox("Audio Devices")
         gv = QVBoxLayout(g)
-        self._audio_devices_label = QLabel("Default audio devices")
+        self._audio_devices_label = QLabel()
+        self._audio_devices_label.setWordWrap(True)
         gv.addWidget(self._audio_devices_label)
+        refresh_audio_btn = QPushButton("Refresh Audio Devices")
+        refresh_audio_btn.clicked.connect(self._refresh_audio_devices)
+        gv.addWidget(refresh_audio_btn)
         layout.addWidget(g)
 
-        g = QGroupBox("Application Settings")
+        g = QGroupBox("Station Settings")
         gv = QVBoxLayout(g)
         h = QHBoxLayout()
-        h.addWidget(QLabel("Grid timeout:"))
-        self._grid_timeout_spin = QSpinBox()
-        self._grid_timeout_spin.setRange(1, 60)
-        self._grid_timeout_spin.setValue(30)
-        self._grid_timeout_spin.setSuffix(" min")
+        h.addWidget(QLabel("Callsign:"))
+        self._settings_callsign_edit = QLineEdit(self.callsign)
+        self._settings_callsign_edit.setMaxLength(9)
+        h.addWidget(self._settings_callsign_edit)
+        h.addWidget(QLabel("APRS path:"))
+        self._settings_aprs_path_edit = QLineEdit(self.aprs_path)
+        h.addWidget(self._settings_aprs_path_edit)
+        gv.addLayout(h)
+
+        h = QHBoxLayout()
+        h.addWidget(QLabel("Latitude:"))
+        self._settings_lat_edit = QLineEdit(f"{self.aprs_lat:.4f}")
+        h.addWidget(self._settings_lat_edit)
+        h.addWidget(QLabel("Longitude:"))
+        self._settings_lon_edit = QLineEdit(f"{self.aprs_lon:.4f}")
+        h.addWidget(self._settings_lon_edit)
         gv.addLayout(h)
         layout.addWidget(g)
+
+        g = QGroupBox("Audio Levels")
+        gv = QVBoxLayout(g)
+        h = QHBoxLayout()
+        h.addWidget(QLabel("Mic gain:"))
+        self._settings_mic_gain_slider = QSlider(Qt.Orientation.Horizontal)
+        self._settings_mic_gain_slider.setRange(0, 200)
+        self._settings_mic_gain_slider.setValue(int(self.mic_gain * 100))
+        self._settings_mic_gain_label = QLabel(f"{self.mic_gain:.1f}x")
+        self._settings_mic_gain_slider.valueChanged.connect(self._on_settings_mic_gain_changed)
+        h.addWidget(self._settings_mic_gain_slider)
+        h.addWidget(self._settings_mic_gain_label)
+        gv.addLayout(h)
+
+        h = QHBoxLayout()
+        h.addWidget(QLabel("Speaker volume:"))
+        self._settings_speaker_volume_slider = QSlider(Qt.Orientation.Horizontal)
+        self._settings_speaker_volume_slider.setRange(0, 200)
+        self._settings_speaker_volume_slider.setValue(int(self.speaker_volume * 100))
+        self._settings_speaker_volume_label = QLabel(f"{self.speaker_volume:.1f}x")
+        self._settings_speaker_volume_slider.valueChanged.connect(
+            self._on_settings_speaker_volume_changed)
+        h.addWidget(self._settings_speaker_volume_slider)
+        h.addWidget(self._settings_speaker_volume_label)
+        gv.addLayout(h)
+        layout.addWidget(g)
+
+        actions = QHBoxLayout()
+        apply_btn = QPushButton("Apply and Save")
+        apply_btn.clicked.connect(self._apply_settings_panel)
+        actions.addWidget(apply_btn)
+        load_btn = QPushButton("Load Saved")
+        load_btn.clicked.connect(self._load_saved_settings_panel)
+        actions.addWidget(load_btn)
+        defaults_btn = QPushButton("Restore Defaults")
+        defaults_btn.clicked.connect(self._restore_settings_defaults)
+        actions.addWidget(defaults_btn)
+        actions.addStretch()
+        self._settings_status = QLabel("Changes are saved only when applied.")
+        actions.addWidget(self._settings_status)
+        layout.addLayout(actions)
 
         g = QGroupBox("About")
         gv = QVBoxLayout(g)
@@ -1732,7 +1788,81 @@ class MainWindow(QMainWindow):
         layout.addWidget(g)
 
         layout.addStretch()
+        self._refresh_audio_devices()
         return tab
+
+    def _refresh_audio_devices(self):
+        try:
+            import sounddevice as sd
+
+            input_device, output_device = sd.default.device
+            devices = sd.query_devices()
+            input_name = devices[input_device]['name'] if input_device >= 0 else "None"
+            output_name = devices[output_device]['name'] if output_device >= 0 else "None"
+            self._audio_devices_label.setText(
+                f"Using system defaults: input {input_name}; output {output_name}."
+            )
+        except Exception as error:
+            self._audio_devices_label.setText(f"Audio device status unavailable: {error}")
+
+    def _on_settings_mic_gain_changed(self, value: int):
+        self._settings_mic_gain_label.setText(f"{value / 100.0:.1f}x")
+        self._set_mic_gain(value)
+        self._mic_gain_slider.setValue(value)
+
+    def _on_settings_speaker_volume_changed(self, value: int):
+        self._settings_speaker_volume_label.setText(f"{value / 100.0:.1f}x")
+        self._set_speaker_volume(value)
+        self._spk_vol_slider.setValue(value)
+
+    def _apply_settings_panel(self):
+        self.callsign = self._settings_callsign_edit.text().strip().upper() or "N0CALL"
+        self.aprs_path = self._settings_aprs_path_edit.text().strip() or "WIDE1-1"
+        latitude = _try_float(self._settings_lat_edit.text(), 0.0)
+        longitude = _try_float(self._settings_lon_edit.text(), 0.0)
+
+        self._callsign_edit.setText(self.callsign)
+        self._lat_edit.setText(f"{latitude:.4f}")
+        self._lon_edit.setText(f"{longitude:.4f}")
+        self._aprs_path_edit.setText(self.aprs_path)
+        self.aprs_lat = latitude
+        self.aprs_lon = longitude
+        if self._igate:
+            self._igate.lat = latitude
+            self._igate.lon = longitude
+        self._save_settings()
+        self._settings_status.setText("Saved.")
+        self.log("Application settings saved")
+
+    def _load_saved_settings_panel(self):
+        self._load_settings()
+        self._sync_settings_panel()
+        self._settings_status.setText("Saved values loaded.")
+
+    def _restore_settings_defaults(self):
+        self._settings_callsign_edit.setText("N0CALL")
+        self._settings_aprs_path_edit.setText("WIDE1-1")
+        self._settings_lat_edit.setText("0.0000")
+        self._settings_lon_edit.setText("0.0000")
+        self._settings_mic_gain_slider.setValue(100)
+        self._settings_speaker_volume_slider.setValue(100)
+        self._settings_status.setText("Defaults ready; select Apply and Save.")
+
+    def _sync_settings_panel(self):
+        latitude = self.aprs_lat
+        longitude = self.aprs_lon
+        self._settings_callsign_edit.setText(self.callsign)
+        self._settings_aprs_path_edit.setText(self.aprs_path)
+        self._settings_lat_edit.setText(f"{latitude:.4f}")
+        self._settings_lon_edit.setText(f"{longitude:.4f}")
+        self._settings_mic_gain_slider.setValue(int(self.mic_gain * 100))
+        self._settings_speaker_volume_slider.setValue(int(self.speaker_volume * 100))
+        self._callsign_edit.setText(self.callsign)
+        self._lat_edit.setText(f"{latitude:.4f}")
+        self._lon_edit.setText(f"{longitude:.4f}")
+        self._aprs_path_edit.setText(self.aprs_path)
+        self.aprs_lat = latitude
+        self.aprs_lon = longitude
 
     # ── Centralized frame I/O with debug logging ─────────────────
 

@@ -37,6 +37,26 @@ def test_window_construction(window):
     assert window._ptt_btn is not None
 
 
+def test_settings_panel_applies_station_and_audio_values(window):
+    window._settings_callsign_edit.setText("k1abc")
+    window._settings_aprs_path_edit.setText("WIDE2-1")
+    window._settings_lat_edit.setText("42.3601")
+    window._settings_lon_edit.setText("-71.0589")
+    window._settings_mic_gain_slider.setValue(130)
+    window._settings_speaker_volume_slider.setValue(70)
+
+    window._apply_settings_panel()
+
+    assert window.callsign == "K1ABC"
+    assert window.aprs_path == "WIDE2-1"
+    assert window.aprs_lat == pytest.approx(42.3601)
+    assert window.aprs_lon == pytest.approx(-71.0589)
+    assert window.mic_gain == pytest.approx(1.3)
+    assert window.speaker_volume == pytest.approx(0.7)
+    assert window._callsign_edit.text() == "K1ABC"
+    assert window._aprs_path_edit.text() == "WIDE2-1"
+
+
 def test_set_frequency_updates_display(window):
     window._freq_edit.setText("146.520")
     window._offset_edit.setText("0.600")
