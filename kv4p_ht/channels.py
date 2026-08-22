@@ -105,6 +105,44 @@ class ChannelBank:
                     ch.bandwidth, "High" if ch.high_power else "Low", ch.notes,
                 ])
 
+    @staticmethod
+    def _parse_offset(row: dict) -> float:
+        """Parse a CSV offset value into a signed MHz offset.
+
+        Detects the direction (+/-) from either a signed offset value or a
+        separate duplex/direction column, and normalizes CHIRP-style kHz
+        values into MHz.
+        """
+        raw = row.get("Offset", "0.0")
+        try:
+            magnitude = abs(float(raw))
+        except (ValueError, TypeError):
+            magnitude = 0.0
+
+        # Direction: prefer an explicit duplex column, else the value's sign.
+        sign = 1.0
+        duplex = (row.get("Duplex") or row.get("Offset Direction")
+                  or row.get("Offset Direction (MHz)") or "").strip().lower()
+        if duplex:
+            if duplex.startswith("-") or duplex in ("down", "minus"):
+                sign = -1.0
+            elif duplex.startswith("+") or duplex in ("up", "plus"):
+                sign = 1.0
+            elif duplex in ("simplex", "off", "none", ""):
+                return 0.0
+        else:
+            try:
+                if float(raw) < 0:
+                    sign = -1.0
+            except (ValueError, TypeError):
+                pass
+
+        # CHIRP exports offset in kHz; our internal unit is MHz.
+        if magnitude >= 10.0:
+            magnitude /= 1000.0
+
+        return sign * magnitude
+
     def import_csv(self, path: str | Path) -> int:
         count = 0
         with open(path, encoding="utf-8", newline="") as f:
@@ -114,7 +152,7 @@ class ChannelBank:
                     ch = Channel(
                         name=row.get("Name", f"CH-{len(self.channels)+1}"),
                         freq_rx=float(row.get("Frequency", "144.390")),
-                        offset=float(row.get("Offset", "0.0")),
+                        offset=self._parse_offset(row),
                         mode=row.get("Mode", "FM"),
                         ctcss_tx=int(float(row.get("CTCSS TX", "0"))),
                         ctcss_rx=int(float(row.get("CTCSS RX", "0"))),

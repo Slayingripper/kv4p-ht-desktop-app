@@ -831,7 +831,13 @@ class MainWindow(QMainWindow):
         h = QHBoxLayout()
         h.addWidget(QLabel("Offset (MHz):"))
         self._offset_edit = QLineEdit(f"{self.offset:.3f}")
+        self._offset_edit.editingFinished.connect(self._set_frequency)
         h.addWidget(self._offset_edit)
+        self._offset_flip_btn = QPushButton("±")
+        self._offset_flip_btn.setToolTip("Flip offset direction (+/-)")
+        self._offset_flip_btn.setFixedWidth(36)
+        self._offset_flip_btn.clicked.connect(self._flip_offset)
+        h.addWidget(self._offset_flip_btn)
         v.addLayout(h)
 
         # Frequency display
@@ -1938,6 +1944,19 @@ class MainWindow(QMainWindow):
             debug_log.warning("PTT active but serial lost — dropping opus frame")
 
     # ── Radio control actions ────────────────────────────────────
+
+    def _flip_offset(self):
+        try:
+            offset = float(self._offset_edit.text() or "0.0")
+        except ValueError:
+            offset = 0.0
+        if offset == 0.0:
+            self.log("Offset is 0 — nothing to flip")
+            return
+        new_offset = -offset
+        self._offset_edit.setText(f"{new_offset:.3f}")
+        self._set_frequency()
+        self.log(f"Offset flipped to {new_offset:+.3f} MHz")
 
     def _set_frequency(self):
         try:
