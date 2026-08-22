@@ -24,7 +24,7 @@ class SpectrumAnalyzer:
         fft_size: int = 2048,
         averaging: int = 4,
         window_type: str = "hann",
-        callback: Callable[[np.ndarray, np.ndarray, float] | None] = None,
+        callback: Callable[[np.ndarray, np.ndarray, float], None] | None = None,
     ):
         self.sample_rate = sample_rate
         self.fft_size = fft_size

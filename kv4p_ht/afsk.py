@@ -14,8 +14,11 @@ SPACE  = 2200.0  # Hz (binary 0)
 BAUD   = 1200
 SR     = 48000
 FLAG   = 0x7E
-LEAD_MS  = 1100
-TAIL_MS  = 700
+PREAMBLE_FLAGS = 50
+POSTAMBLE_FLAGS = 3
+SQUELCH_OPEN_MS = 300
+LEAD_MS  = 0
+TAIL_MS  = 0
 
 SPB = SR // BAUD  # 40 samples per bit
 
@@ -72,6 +75,23 @@ def _nrzi_encode(bits: list[int], initial: int = 1) -> list[int]:
     return out
 
 
+def _frame_to_nrzi(frame: bytes) -> list[int]:
+    flag_bits = _flag_bits()
+    stuffed = _bit_stuff(_bytes_to_bits_lsb(frame))
+    return _nrzi_encode(
+        flag_bits * PREAMBLE_FLAGS + stuffed + flag_bits * POSTAMBLE_FLAGS
+    )
+
+
+def _modulate_nrz(bits: list[int], squelch_open: bool = False) -> np.ndarray:
+    freq_table = np.where(np.repeat(np.array(bits), SPB) == 1, MARK, SPACE)
+    if squelch_open:
+        carrier = np.full(int(SR * SQUELCH_OPEN_MS / 1000), MARK)
+        freq_table = np.concatenate([carrier, freq_table])
+    phase = 2.0 * np.pi * np.cumsum(freq_table / SR)
+    return (np.sin(phase) * 0.3).astype(np.float32)
+
+
 def build_ax25_bits(source: str, dest: str,
                     digipeaters: list[str], info: bytes) -> list[int]:
     """Build complete AX.25 bitstream: flag + body + CRC + flag, bit-stuffed, NRZI."""
@@ -79,11 +99,7 @@ def build_ax25_bits(source: str, dest: str,
     crc = crc_ccitt(body)
     frame = body + struct.pack('<H', crc)
 
-    flag_bits = _flag_bits()
-    data_bits = _bytes_to_bits_lsb(frame)
-    stuffed = _bit_stuff(data_bits)
-    nrz = _nrzi_encode(flag_bits + stuffed + flag_bits)
-    return nrz
+    return _frame_to_nrzi(frame)
 
 
 def modulate_ax25(source: str, dest: str,
@@ -91,28 +107,13 @@ def modulate_ax25(source: str, dest: str,
     """Generate AFSK1200 audio waveform as float32 numpy array."""
     bits = build_ax25_bits(source, dest, digipeaters, info)
 
-    total = len(bits) * SPB
-    waveform = np.empty(total, dtype=np.float32)
-
-    # Precompute per-sample frequencies using repeat
-    freq_table = np.where(np.array(bits) == 1, MARK, SPACE)
-    freqs = np.repeat(freq_table, SPB)
-
-    # Continuous-phase FSK via cumulative sum
-    dt = 1.0 / SR
-    phase = 2.0 * np.pi * np.cumsum(freqs * dt)
-    np.sin(phase, out=waveform)
-
-    return waveform * 0.3  # keep some headroom
+    return _modulate_nrz(bits)
 
 
 def build_tx_waveform(source: str, dest: str,
                       digipeaters: list[str], info: bytes) -> np.ndarray:
-    """Full TX waveform with lead/tail silence, ready to send as Opus."""
-    audio = modulate_ax25(source, dest, digipeaters, info)
-    lead = np.zeros(int(SR * LEAD_MS / 1000), dtype=np.float32)
-    tail = np.zeros(int(SR * TAIL_MS / 1000), dtype=np.float32)
-    return np.concatenate([lead, audio, tail])
+    """AX.25 waveform with a carrier warm-up and flag preamble."""
+    return _modulate_nrz(build_ax25_bits(source, dest, digipeaters, info), True)
 
 
 def build_tx_waveform_from_body(body: bytes) -> np.ndarray:
@@ -121,20 +122,6 @@ def build_tx_waveform_from_body(body: bytes) -> np.ndarray:
     crc = crc_ccitt(body)
     frame = body + struct.pack('<H', crc)
 
-    flag_bits = _flag_bits()
-    data_bits = _bytes_to_bits_lsb(frame)
-    stuffed = _bit_stuff(data_bits)
-    nrz = _nrzi_encode(flag_bits + stuffed + flag_bits)
+    nrz = _frame_to_nrzi(frame)
 
-    total = len(nrz) * SPB
-    waveform = np.empty(total, dtype=np.float32)
-    freq_table = np.where(np.array(nrz) == 1, MARK, SPACE)
-    freqs = np.repeat(freq_table, SPB)
-    dt = 1.0 / SR
-    phase = 2.0 * np.pi * np.cumsum(freqs * dt)
-    np.sin(phase, out=waveform)
-
-    audio = waveform * 0.3
-    lead = np.zeros(int(SR * LEAD_MS / 1000), dtype=np.float32)
-    tail = np.zeros(int(SR * TAIL_MS / 1000), dtype=np.float32)
-    return np.concatenate([lead, audio, tail])
+    return _modulate_nrz(nrz, True)

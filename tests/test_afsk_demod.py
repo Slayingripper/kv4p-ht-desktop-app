@@ -6,7 +6,12 @@ import struct
 
 import numpy as np
 
-from kv4p_ht.afsk import build_tx_waveform_from_body, crc_ccitt
+from kv4p_ht.afsk import (
+    PREAMBLE_FLAGS,
+    SQUELCH_OPEN_MS,
+    build_tx_waveform_from_body,
+    crc_ccitt,
+)
 from kv4p_ht.afsk_demod import (
     _CRC_TABLE,
     AX25_CRC_OK,
@@ -115,6 +120,12 @@ class TestInitialization:
         assert d._carrier_energy == 0.0
         assert d._carrier_threshold == 0.001
         assert d._carrier_on is False
+        assert d.diagnostics() == {
+            'carrier': False,
+            'carrier_starts': 0,
+            'valid_frames': 0,
+            'rejected_frames': 0,
+        }
 
 
 class TestReset:
@@ -744,9 +755,8 @@ class TestInvalidCRC:
     def test_corrupted_waveform_does_not_decode(self):
         body = encode_ax25_ui('N0CALL', 'APZ010', [], b'>test data')
         waveform = build_tx_waveform_from_body(body)
-        lead_len = int(SR * 1100 / 1000)
-        audio_end = lead_len + int(SR * 200 / 1000)
-        waveform[lead_len:audio_end] = 0.0
+        payload_start = int(SR * SQUELCH_OPEN_MS / 1000) + PREAMBLE_FLAGS * 8 * SPB
+        waveform[payload_start:payload_start + int(SR * 0.2)] = 0.0
         captured = []
         d = AfskDemodulator(callback=captured.append)
         d.process(waveform.tolist())
@@ -755,8 +765,7 @@ class TestInvalidCRC:
     def test_corrupted_samples_does_not_decode(self):
         body = encode_ax25_ui('TEST', 'DEST', [], b'>test')
         waveform = build_tx_waveform_from_body(body).copy()
-        lead_len = int(SR * 1100 / 1000)
-        audio_start = lead_len
+        audio_start = int(SR * SQUELCH_OPEN_MS / 1000) + PREAMBLE_FLAGS * 8 * SPB
         audio_data = waveform[audio_start:]
         audio_data[:len(audio_data) // 2] = np.random.uniform(-0.5, 0.5, len(audio_data) // 2)
         waveform[audio_start:] = audio_data

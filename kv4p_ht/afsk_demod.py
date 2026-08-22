@@ -59,6 +59,17 @@ class AfskDemodulator:
         self._carrier_energy = 0.0
         self._carrier_threshold = 0.001
         self._carrier_on = False
+        self.carrier_starts = 0
+        self.valid_frames = 0
+        self.rejected_frames = 0
+
+    def diagnostics(self) -> dict[str, int | bool]:
+        return {
+            'carrier': self._carrier_on,
+            'carrier_starts': self.carrier_starts,
+            'valid_frames': self.valid_frames,
+            'rejected_frames': self.rejected_frames,
+        }
 
     def _reset(self):
         self._state = 'WAITING'
@@ -79,9 +90,11 @@ class AfskDemodulator:
 
     def _finalize(self):
         if len(self._frame) < 18:
+            self.rejected_frames += 1
             self._reset()
             return
         if self._crc != AX25_CRC_OK:
+            self.rejected_frames += 1
             self._reset()
             return
         body = bytes(self._frame[:-2])
@@ -92,7 +105,9 @@ class AfskDemodulator:
             parsed['raw_frame'] = body
             if self.callback:
                 self.callback(parsed)
+            self.valid_frames += 1
         except Exception:
+            self.rejected_frames += 1
             pass
         self._reset()
 
@@ -129,7 +144,10 @@ class AfskDemodulator:
 
         # carrier energy estimate (for squelch)
         self._carrier_energy = self._carrier_energy * 0.99 + (mm + ms) * 0.01
+        carrier_was_on = self._carrier_on
         self._carrier_on = self._carrier_energy > self._carrier_threshold
+        if self._carrier_on and not carrier_was_on:
+            self.carrier_starts += 1
 
         self._fdiff_hist.append(fdiff)
         if len(self._fdiff_hist) > self._fdiff_hist_len:

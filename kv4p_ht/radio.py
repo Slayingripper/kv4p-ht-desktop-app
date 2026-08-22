@@ -160,6 +160,7 @@ class SerialWorker(QThread):
 class AudioWorker(QThread):
     opus_for_tx = pyqtSignal(bytes)
     aprs_packet = pyqtSignal(object)
+    aprs_diagnostics = pyqtSignal(object)
     morse_samples = pyqtSignal(object)
     debug_msg = pyqtSignal(str)
 
@@ -269,6 +270,12 @@ class AudioWorker(QThread):
         acc = bytearray()
         _demod_loop_count = 0
         _demod_total_samples = 0
+        _last_diagnostics = time.monotonic()
+        _rx_opus_frames = 0
+        _rx_pcm_samples = 0
+        _opus_decode_errors = 0
+        _last_opus_bytes = 0
+        _last_opus_error = ''
         PREBUF_FRAMES = 5
 
         import queue as _q
@@ -306,12 +313,17 @@ class AudioWorker(QThread):
                         raw = self.rx_opus_queue.get_nowait()
                         if raw is None:
                             break
+                        _rx_opus_frames += 1
+                        _last_opus_bytes = len(raw)
                         try:
                             pcm_bytes = dec.decode(raw, self._frame)
                             arr = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
                             _rx_pcm_queue.put(arr * self.speaker_volume)
-                            _demod_pcm_queue.put(arr.copy())
+                            self._demod_pcm_queue.put(arr.copy())
+                            _rx_pcm_samples += len(arr)
                         except Exception as e:
+                            _opus_decode_errors += 1
+                            _last_opus_error = str(e)
                             print(f"[Audio] Opus decode: {e}")
                     except _q.Empty:
                         break
@@ -356,6 +368,17 @@ class AudioWorker(QThread):
                         break
 
                 _demod_loop_count += 1
+                if time.monotonic() - _last_diagnostics >= 1.0:
+                    diagnostics = _demod.diagnostics()
+                    diagnostics.update({
+                        'rx_opus_frames': _rx_opus_frames,
+                        'rx_pcm_samples': _rx_pcm_samples,
+                        'opus_decode_errors': _opus_decode_errors,
+                        'last_opus_bytes': _last_opus_bytes,
+                        'last_opus_error': _last_opus_error,
+                    })
+                    self.aprs_diagnostics.emit(diagnostics)
+                    _last_diagnostics = time.monotonic()
                 if _demod_loop_count % 500 == 0:
                     self.debug_msg.emit(
                         f"Demod: {_demod_loop_count} loops, "

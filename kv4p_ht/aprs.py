@@ -102,9 +102,18 @@ def parse_aprs(info_field: str, source: str = '') -> dict:
     elif info_field[0] in ('=', '!', '@', '/'):
         # Position report
         result['type'] = 'position'
-        data = info_field[1:] if info_field[0] in ('=', '@') else info_field
+        if info_field[0] in ('=', '@'):
+            data = info_field[1:]
+        else:
+            data = info_field
         result['raw_position'] = data[:19]
-        result['comment'] = data[20:] if len(data) > 20 else ''
+        if len(data) > 19:
+            # The APRS position field is a fixed-length prefix plus an optional
+            # comment. Keep the first character of the comment, which is part of
+            # the data immediately after the position text.
+            result['comment'] = data[19:]
+        else:
+            result['comment'] = ''
     elif info_field[0] == '>':
         result['type'] = 'status'
         result['text'] = info_field[1:]
@@ -157,6 +166,7 @@ class IGate(threading.Thread):
                  tx_enabled: bool = True,
                  status_text: str = '',
                  beacon_interval: int = 600,
+                 passcode: str = '-1',
                  ):
         super().__init__(daemon=True)
         self.callsign = callsign
@@ -168,6 +178,7 @@ class IGate(threading.Thread):
         self.tx_enabled = tx_enabled
         self.status_text = status_text
         self._beacon_interval = beacon_interval
+        self.passcode = passcode
         self._to_is_queue: queue.SimpleQueue = queue.SimpleQueue()
         self._running = True
         self._last_beacon = 0.0
@@ -187,7 +198,7 @@ class IGate(threading.Thread):
                 )
                 sock.settimeout(60)
                 login = (
-                    f"user {self.callsign} pass -1 vers kv4p-desktop 0.1\r\n"
+                    f"user {self.callsign} pass {self.passcode} vers kv4p-desktop 0.1\r\n"
                 )
                 sock.sendall(login.encode())
                 time.sleep(0.5)

@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QFrame,
     QGroupBox,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -556,6 +557,7 @@ class MainWindow(QMainWindow):
         left_layout = QVBoxLayout(left)
         left_layout.setSpacing(4)
         left_layout.addWidget(self._radio_control_group())
+        left_layout.addWidget(self._favorite_channels_group())
         left_layout.addWidget(self._audio_group())
         left_layout.addStretch()
         desktop_layout.addWidget(left)
@@ -653,6 +655,18 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self._ch_export_btn)
         left_l.addLayout(toolbar)
 
+        # Search / filter row
+        search_row = QHBoxLayout()
+        self._ch_search = QLineEdit()
+        self._ch_search.setPlaceholderText("Search channels (name, freq, mode, notes)…")
+        self._ch_search.setClearButtonEnabled(True)
+        self._ch_search.textChanged.connect(self._apply_channel_search)
+        search_row.addWidget(self._ch_search)
+        self._ch_count_label = QLabel("0 channel(s)")
+        self._ch_count_label.setStyleSheet("color: #888;")
+        search_row.addWidget(self._ch_count_label)
+        left_l.addLayout(search_row)
+
         self._ch_list = QComboBox()
         self._ch_list.setMinimumHeight(300)
         self._ch_list.setStyleSheet(
@@ -707,6 +721,15 @@ class MainWindow(QMainWindow):
         tune_btn.clicked.connect(self._ch_tune)
         btn_row.addWidget(tune_btn)
         right_l.addLayout(btn_row)
+
+        self._ch_fav_btn = QPushButton("☆ Favorite")
+        self._ch_fav_btn.setCheckable(True)
+        self._ch_fav_btn.setToolTip("Pin this channel to the Radio tab favorites")
+        self._ch_fav_btn.setStyleSheet(
+            "QPushButton:checked { background-color: #b8860b; color: white; }"
+        )
+        self._ch_fav_btn.clicked.connect(self._ch_toggle_favorite)
+        right_l.addWidget(self._ch_fav_btn)
         right_l.addStretch()
 
         layout.addWidget(right, stretch=1)
@@ -715,17 +738,47 @@ class MainWindow(QMainWindow):
         return tab
 
     def _refresh_channel_list(self):
-        self._ch_list.clear()
-        for ch in self._channel_bank.channels:
-            self._ch_list.addItem(
-                f"{ch.name}  {ch.freq_rx:.3f} MHz  {ch.mode}", len(self._ch_list)
-            )
+        self._apply_channel_search()
+        if hasattr(self, "_fav_grid"):
+            self._rebuild_favorite_buttons()
         self._sync_faceplate()
 
-    def _ch_select(self, idx: int):
-        if idx < 0 or idx >= len(self._channel_bank.channels):
+    def _apply_channel_search(self):
+        """Filter the channel list by the search box text (name/freq/mode/notes)."""
+        self._ch_list.blockSignals(True)
+        self._ch_list.clear()
+        query = self._ch_search.text().strip().lower()
+        for real_idx, ch in enumerate(self._channel_bank.channels):
+            if query:
+                haystack = f"{ch.name} {ch.freq_rx:.4f} {ch.mode} {ch.notes}".lower()
+                if query not in haystack:
+                    continue
+            self._ch_list.addItem(
+                f"{ch.name}  {ch.freq_rx:.3f} MHz  {ch.mode}", real_idx
+            )
+        self._ch_list.blockSignals(False)
+        self._ch_count_label.setText(f"{self._ch_list.count()} channel(s)")
+
+        if self._ch_list.count() == 0:
             return
-        ch = self._channel_bank.channels[idx]
+
+        if self._ch_list.currentIndex() < 0:
+            self._ch_list.setCurrentIndex(0)
+        self._ch_select(self._ch_list.currentIndex())
+
+    def _ch_current_real_index(self) -> int:
+        """Return the real channel-bank index of the selected list item (-1 if none)."""
+        idx = self._ch_list.currentIndex()
+        if idx < 0:
+            return -1
+        data = self._ch_list.itemData(idx)
+        return data if isinstance(data, int) else -1
+
+    def _ch_select(self, idx: int):
+        real_idx = self._ch_current_real_index()
+        if real_idx < 0 or real_idx >= len(self._channel_bank.channels):
+            return
+        ch = self._channel_bank.channels[real_idx]
         self._ch_name_edit.setText(ch.name)
         self._ch_freq_edit.setText(f"{ch.freq_rx:.4f}")
         self._ch_offset_edit.setText(f"{ch.offset:.4f}")
@@ -737,6 +790,8 @@ class MainWindow(QMainWindow):
             next((i for i in range(self._ch_ctcss_rx_combo.count())
                   if self._ch_ctcss_rx_combo.itemData(i) == ch.ctcss_rx), 0))
         self._ch_notes_edit.setText(ch.notes)
+        self._ch_fav_btn.setChecked(ch.favorite)
+        self._ch_fav_btn.setText("★ Unfavorite" if ch.favorite else "☆ Favorite")
 
     def _ch_add(self):
         ch = Channel(
@@ -747,46 +802,58 @@ class MainWindow(QMainWindow):
         )
         self._channel_bank.add(ch)
         self._refresh_channel_list()
-        self._ch_list.setCurrentIndex(len(self._channel_bank.channels) - 1)
+        self._select_real_channel(len(self._channel_bank.channels) - 1)
 
     def _ch_remove(self):
-        idx = self._ch_list.currentIndex()
-        if 0 <= idx < len(self._channel_bank.channels):
-            name = self._channel_bank.channels[idx].name
-            self._channel_bank.remove(idx)
+        real_idx = self._ch_current_real_index()
+        if 0 <= real_idx < len(self._channel_bank.channels):
+            name = self._channel_bank.channels[real_idx].name
+            self._channel_bank.remove(real_idx)
             self._refresh_channel_list()
             self.log(f"Channel '{name}' removed")
 
     def _ch_save(self):
-        idx = self._ch_list.currentIndex()
-        if idx < 0 or idx >= len(self._channel_bank.channels):
+        real_idx = self._ch_current_real_index()
+        if real_idx < 0 or real_idx >= len(self._channel_bank.channels):
             return
         ch = Channel(
-            name=self._ch_name_edit.text().strip() or f"CH-{idx+1}",
+            name=self._ch_name_edit.text().strip() or f"CH-{real_idx+1}",
             freq_rx=float(self._ch_freq_edit.text() or "144.390"),
             offset=float(self._ch_offset_edit.text() or "0.0"),
             mode=self._ch_mode_combo.currentText(),
             ctcss_tx=self._ch_ctcss_tx_combo.currentData() or 0,
             ctcss_rx=self._ch_ctcss_rx_combo.currentData() or 0,
+            favorite=self._ch_fav_btn.isChecked(),
             notes=self._ch_notes_edit.text().strip(),
         )
-        self._channel_bank.update(idx, ch)
+        self._channel_bank.update(real_idx, ch)
         self._refresh_channel_list()
-        self._ch_list.setCurrentIndex(idx)
+        self._select_real_channel(real_idx)
         self.log(f"Channel '{ch.name}' saved")
 
     def _ch_tune(self):
-        idx = self._ch_list.currentIndex()
-        if 0 <= idx < len(self._channel_bank.channels):
-            ch = self._channel_bank.channels[idx]
-            self.freq_rx = ch.freq_rx
-            self.offset = ch.offset
-            self.freq_tx = ch.freq_rx + ch.offset
-            self._freq_edit.setText(f"{ch.freq_rx:.3f}")
-            self._freq_display.setText(f"TX: {self.freq_tx:.3f} MHz  RX: {self.freq_rx:.3f} MHz")
-            self._set_radio_mode(ch.mode)
-            self._send_group()
-            self.log(f"Tuned to {ch.name}: {ch.freq_rx:.3f} MHz {ch.mode}")
+        real_idx = self._ch_current_real_index()
+        if 0 <= real_idx < len(self._channel_bank.channels):
+            self._tune_to_channel(self._channel_bank.channels[real_idx])
+
+    def _ch_toggle_favorite(self):
+        real_idx = self._ch_current_real_index()
+        if real_idx < 0 or real_idx >= len(self._channel_bank.channels):
+            return
+        ch = self._channel_bank.channels[real_idx]
+        ch.favorite = not ch.favorite
+        self._channel_bank.update(real_idx, ch)
+        self._ch_fav_btn.setChecked(ch.favorite)
+        self._ch_fav_btn.setText("★ Unfavorite" if ch.favorite else "☆ Favorite")
+        self._rebuild_favorite_buttons()
+        self.log(f"Channel '{ch.name}' {'added to' if ch.favorite else 'removed from'} favorites")
+
+    def _select_real_channel(self, real_idx: int):
+        """Select the list item whose data is the given real channel index."""
+        for i in range(self._ch_list.count()):
+            if self._ch_list.itemData(i) == real_idx:
+                self._ch_list.setCurrentIndex(i)
+                return
 
     def _ch_import(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -911,6 +978,66 @@ class MainWindow(QMainWindow):
         v.addLayout(h)
 
         return g
+
+    def _favorite_channels_group(self) -> QGroupBox:
+        g = QGroupBox("Favorite Channels")
+        v = QVBoxLayout(g)
+        v.setSpacing(4)
+
+        self._fav_grid = QGridLayout()
+        self._fav_grid.setSpacing(4)
+        v.addLayout(self._fav_grid)
+
+        self._fav_hint = QLabel("")
+        self._fav_hint.setWordWrap(True)
+        self._fav_hint.setStyleSheet("color: #888; font-size: 11px;")
+        v.addWidget(self._fav_hint)
+
+        self._rebuild_favorite_buttons()
+        return g
+
+    def _rebuild_favorite_buttons(self):
+        """Rebuild the favorite-channel buttons on the Radio tab."""
+        # Clear existing buttons (keep the hint label)
+        while self._fav_grid.count():
+            item = self._fav_grid.takeAt(0)
+            w = item.widget() if item else None
+            if w is not None and w is not self._fav_hint:
+                w.deleteLater()
+
+        channels = [c for c in self._channel_bank.channels if c.favorite]
+        if not channels:
+            # Fall back to the first few channels so the panel is useful
+            channels = self._channel_bank.channels[:8]
+            self._fav_hint.setText("No favorites yet — showing first channels.\n"
+                                   "Mark a channel ★ in the Channels tab to pin it here.")
+        else:
+            self._fav_hint.setText("")
+
+        cols = 2
+        for i, ch in enumerate(channels):
+            btn = QPushButton(f"{ch.name}\n{ch.freq_rx:.3f}")
+            btn.setToolTip(f"{ch.name} — {ch.freq_rx:.4f} MHz {ch.mode}")
+            btn.setMinimumHeight(44)
+            btn.setStyleSheet(
+                "QPushButton { border: 1px solid #555; border-radius: 4px; font-size: 11px; }"
+                "QPushButton:hover { background-color: #2d7d2d; color: white; }"
+            )
+            btn.clicked.connect(lambda _=False, c=ch: self._tune_to_channel(c))
+            self._fav_grid.addWidget(btn, i // cols, i % cols)
+
+    def _tune_to_channel(self, ch: Channel):
+        self.freq_rx = ch.freq_rx
+        self.offset = ch.offset
+        self.freq_tx = ch.freq_rx + ch.offset
+        self.radio_mode = ch.mode
+        self._freq_edit.setText(f"{ch.freq_rx:.3f}")
+        self._offset_edit.setText(f"{ch.offset:.3f}")
+        self._freq_display.setText(f"TX: {self.freq_tx:.3f} MHz  RX: {self.freq_rx:.3f} MHz")
+        self._set_radio_mode(ch.mode)
+        self._send_group()
+        self._sync_faceplate()
+        self.log(f"Tuned to {ch.name}: {ch.freq_rx:.3f} MHz {ch.mode}")
 
     def _audio_group(self) -> QGroupBox:
         g = QGroupBox("Audio")
@@ -1083,6 +1210,12 @@ class MainWindow(QMainWindow):
         gv.addWidget(self._igate_filter)
 
         h = QHBoxLayout()
+        h.addWidget(QLabel("IS passcode:"))
+        self._igate_passcode = QLineEdit()
+        self._igate_passcode.setEchoMode(QLineEdit.EchoMode.Password)
+        self._igate_passcode.setPlaceholderText("Required for APRS-IS TX")
+        self._igate_passcode.setFixedWidth(130)
+        h.addWidget(self._igate_passcode)
         self._igate_tx = QCheckBox("IS->RF TX")
         self._igate_tx.setChecked(True)
         h.addWidget(self._igate_tx)
@@ -1121,6 +1254,9 @@ class MainWindow(QMainWindow):
         self._test_status = QLabel("")
         h.addWidget(self._test_status)
         ll.addLayout(h)
+        self._aprs_rx_status = QLabel("RF RX: waiting for audio")
+        self._aprs_rx_status.setWordWrap(True)
+        ll.addWidget(self._aprs_rx_status)
         ll.addStretch()
         layout.addWidget(left)
 
@@ -1665,6 +1801,7 @@ class MainWindow(QMainWindow):
 
         self._audio.opus_for_tx.connect(self._on_opus_from_mic)
         self._audio.aprs_packet.connect(self._on_aprs_demodulated)
+        self._audio.aprs_diagnostics.connect(self._on_aprs_diagnostics)
         self._audio.morse_samples.connect(self._on_morse_audio)
         self._audio.debug_msg.connect(lambda m: self.log(f"[AUDIO] {m}"))
         self._audio.start()
@@ -1929,6 +2066,21 @@ class MainWindow(QMainWindow):
                         self._file_receiver.process_packet(info_bytes)
             except Exception:
                 pass
+
+    def _on_aprs_diagnostics(self, diagnostics: dict):
+        carrier = "active" if diagnostics.get('carrier') else "idle"
+        decode_error = diagnostics.get('last_opus_error', '')
+        error_detail = f" ({decode_error})" if decode_error else ''
+        self._aprs_rx_status.setText(
+            f"Audio: {diagnostics.get('rx_opus_frames', 0)} Opus / "
+            f"{diagnostics.get('rx_pcm_samples', 0)} PCM / "
+            f"{diagnostics.get('opus_decode_errors', 0)} errors; "
+            f"last frame: {diagnostics.get('last_opus_bytes', 0)} B"
+            f"{error_detail}\n"
+            f"AFSK: {carrier} | carrier starts: {diagnostics.get('carrier_starts', 0)} | "
+            f"valid: {diagnostics.get('valid_frames', 0)} | "
+            f"rejected: {diagnostics.get('rejected_frames', 0)}"
+        )
 
     def _on_debug(self, level: int, text: str):
         level_names = {1: 'INFO', 2: 'ERROR', 3: 'WARN', 4: 'DEBUG', 5: 'TRACE'}
@@ -2637,7 +2789,7 @@ class MainWindow(QMainWindow):
             self._audio.inject_audio(waveform.copy())
         worker = TxWorker(waveform, self._serial.cmd_queue)
         worker.start()
-        worker.wait(timeout=30)
+        worker.wait(30000)
 
     def _ft_toggle_receiver(self, on: bool):
         if on:
@@ -2672,6 +2824,13 @@ class MainWindow(QMainWindow):
             self._igate.lon = self.aprs_lon
 
     def _toggle_igate(self, on: bool):
+        passcode = self._igate_passcode.text().strip()
+        if on and not passcode:
+            self._igate_btn.blockSignals(True)
+            self._igate_btn.setChecked(False)
+            self._igate_btn.blockSignals(False)
+            self.log("APRS iGate needs an APRS-IS passcode for verified uploads")
+            return
         self.aprs_igate_on = on
         self._igate_btn.setText("iGate ON" if on else "iGate OFF")
         if on:
@@ -2683,9 +2842,10 @@ class MainWindow(QMainWindow):
                 filter_str=self._igate_filter.text().strip(),
                 tx_enabled=self._igate_tx.isChecked(),
                 status_text=self._igate_status.text().strip(),
+                passcode=passcode,
             )
             self._igate.start()
-            self.log("APRS iGate started")
+            self.log("APRS iGate connecting; wait for APRS-IS logresp verified")
         else:
             if self._igate:
                 self._igate.stop()
@@ -2729,8 +2889,7 @@ class MainWindow(QMainWindow):
 
         info = format_message(dest, text)
         self.log(f"Generating AFSK for {dest}...")
-        waveform = build_tx_waveform(self.callsign, dest, [], info.encode())
-        self._tx_afsk_waveform(waveform)
+        self._send_aprs_rf(self.callsign, "APZ010", info.encode())
         if self.aprs_igate_on and self._igate:
             self._igate.send_to_is(self.callsign, info)
         self._aprs_log.append(f"[TX MSG] {self.callsign} -> {dest}: {text}")
@@ -2805,7 +2964,7 @@ class MainWindow(QMainWindow):
         ts = datetime.datetime.now().strftime("%H:%M:%S")
         self._log.append(f"[{ts}] {msg}")
         doc = self._log.document()
-        if doc.blockCount() > 300:
+        if doc and doc.blockCount() > 300:
             cursor = self._log.textCursor()
             cursor.movePosition(cursor.MoveOperation.Start)
             cursor.select(cursor.SelectionType.BlockUnderCursor)
@@ -2815,7 +2974,7 @@ class MainWindow(QMainWindow):
         if sb:
             sb.setValue(sb.maximum())
 
-    def closeEvent(self, event):
+    def closeEvent(self, a0):
         self.log("Shutting down...")
         self._save_settings()
         if self._tx_worker and self._tx_worker.isRunning():

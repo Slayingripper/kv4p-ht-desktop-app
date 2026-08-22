@@ -23,6 +23,7 @@ class Channel:
     squelch: int = 3
     bandwidth: int = 0
     high_power: bool = True
+    favorite: bool = False
     notes: str = ""
 
     @property

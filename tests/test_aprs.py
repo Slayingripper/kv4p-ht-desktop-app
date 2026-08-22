@@ -279,7 +279,7 @@ class TestParseAprs:
         result = parse_aprs("=4237.50N/07102.30W-Some comment here")
         assert result['type'] == 'position'
         assert result['raw_position'] == '4237.50N/07102.30W-'
-        assert result['comment'] == 'ome comment here'
+        assert result['comment'] == 'Some comment here'
 
     def test_position_no_comment(self):
         result = parse_aprs("=4237.50N/07102.30W-")
@@ -529,6 +529,26 @@ class TestDigipeater:
 
 
 class TestIGate:
+    @patch('time.sleep', return_value=None)
+    @patch('socket.create_connection')
+    def test_login_uses_configured_passcode(self, mock_create_conn, mock_sleep):
+        mock_sock = MagicMock()
+        mock_file = MagicMock()
+        mock_sock.makefile.return_value = mock_file
+        mock_create_conn.return_value = mock_sock
+        igate = IGate("MYCALL", lambda x, **kw: None, lambda x: None,
+                      tx_enabled=False, passcode="12345")
+
+        def on_readline():
+            igate._running = False
+            return ''
+
+        mock_file.readline.side_effect = on_readline
+        igate.run()
+        assert mock_sock.sendall.call_args_list[0].args[0] == (
+            b"user MYCALL pass 12345 vers kv4p-desktop 0.1\r\n"
+        )
+
     @patch('time.sleep', return_value=None)
     @patch('socket.create_connection')
     def test_send_to_is_queue(self, mock_create_conn, mock_sleep):

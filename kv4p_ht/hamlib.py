@@ -220,29 +220,23 @@ class RigCtlD:
         for c in cmds:
             try:
                 sock.sendall(c)
+                line = self._recv_line(sock)
             except OSError:
                 return False
-
-        for _ in cmds:
-            line = self._recv_line(sock)
             if line is None:
                 return False
             self._handle_response(line)
 
         sql_cmd = b"l RIG_SQL\n"
         str_cmd = b"l RIG_STRENGTH\n"
-        try:
-            sock.sendall(sql_cmd)
-            line = self._recv_line(sock)
+        for cmd in (sql_cmd, str_cmd):
+            try:
+                sock.sendall(cmd)
+                line = self._recv_line(sock)
+            except OSError:
+                return False
             if line is not None:
                 self._handle_response(line)
-
-            sock.sendall(str_cmd)
-            line = self._recv_line(sock)
-            if line is not None:
-                self._handle_response(line)
-        except OSError:
-            return False
 
         return True
 

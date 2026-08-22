@@ -89,8 +89,8 @@ class FileTransferSender:
     def __init__(self, source_call: str, dest_call: str,
                  tx_callback: Callable[[bytes], None],
                  log_fn: Callable[[str], None] | None = None,
-                 progress_callback: Callable[[int, int] | None] = None,
-                 on_complete: Callable[[bool, str] | None] = None):
+                 progress_callback: Callable[[int, int], None] | None = None,
+                 on_complete: Callable[[bool, str], None] | None = None):
         self.source_call = source_call
         self.dest_call = dest_call
         self._tx_callback = tx_callback
@@ -255,8 +255,8 @@ class FileTransferReceiver:
     def __init__(self, source_call: str, dest_call: str,
                  tx_callback: Callable[[bytes], None],
                  log_fn: Callable[[str], None] | None = None,
-                 progress_callback: Callable[[int, int] | None] = None,
-                 on_complete: Callable[[bool, str] | None] = None,
+                 progress_callback: Callable[[int, int], None] | None = None,
+                 on_complete: Callable[[bool, str], None] | None = None,
                  output_dir: str = '.'):
         self.source_call = source_call
         self.dest_call = dest_call

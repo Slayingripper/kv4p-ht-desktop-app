@@ -9,6 +9,9 @@ from kv4p_ht.afsk import (
     FLAG,
     LEAD_MS,
     MARK,
+    POSTAMBLE_FLAGS,
+    PREAMBLE_FLAGS,
+    SQUELCH_OPEN_MS,
     SPACE,
     SPB,
     SR,
@@ -46,11 +49,12 @@ class TestConstants:
         assert SPB == SR // BAUD
         assert SPB == 40
 
-    def test_lead_ms(self):
-        assert LEAD_MS == 1100
+    def test_flag_counts(self):
+        assert PREAMBLE_FLAGS == 50
+        assert POSTAMBLE_FLAGS == 3
 
-    def test_tail_ms(self):
-        assert TAIL_MS == 700
+    def test_squelch_open_duration(self):
+        assert SQUELCH_OPEN_MS == 300
 
 
 class TestCrcCcitt:
@@ -220,7 +224,7 @@ class TestBuildAx25Bits:
 
     def test_known_length(self):
         bits = build_ax25_bits("TEST", "DEST", [], b"info")
-        assert len(bits) == 193
+        assert len(bits) == 601
 
     def test_with_aprs_message(self):
         info = b":DEST     :Hello{001"
@@ -241,7 +245,9 @@ class TestBuildAx25Bits:
                 encode_ax25_ui("TEST", "DEST", [], b"info")))
         ))
         flag = _flag_bits()
-        expected_nrzi = _nrzi_encode(flag + stuffed + flag)
+        expected_nrzi = _nrzi_encode(
+            flag * PREAMBLE_FLAGS + stuffed + flag * POSTAMBLE_FLAGS
+        )
         assert bits == expected_nrzi
 
 
@@ -313,54 +319,25 @@ class TestBuildTxWaveform:
 
     def test_correct_total_length(self):
         audio = modulate_ax25("TEST", "DEST", [], b"info")
-        lead = int(SR * LEAD_MS / 1000)
-        tail = int(SR * TAIL_MS / 1000)
         tx = build_tx_waveform("TEST", "DEST", [], b"info")
-        assert len(tx) == lead + len(audio) + tail
+        assert len(tx) == len(audio) + int(SR * SQUELCH_OPEN_MS / 1000)
 
-    def test_lead_silence(self):
-        lead = int(SR * LEAD_MS / 1000)
-        tx = build_tx_waveform("TEST", "DEST", [], b"info")
-        assert np.all(tx[:lead] == 0)
-
-    def test_lead_silence_length(self):
-        lead = int(SR * LEAD_MS / 1000)
-        tx = build_tx_waveform("TEST", "DEST", [], b"info")
-        assert len(tx[:lead]) == lead
-
-    def test_tail_silence(self):
-        tail = int(SR * TAIL_MS / 1000)
-        tx = build_tx_waveform("TEST", "DEST", [], b"info")
-        assert np.all(tx[-tail:] == 0)
-
-    def test_tail_silence_length(self):
-        tail = int(SR * TAIL_MS / 1000)
-        tx = build_tx_waveform("TEST", "DEST", [], b"info")
-        assert len(tx[-tail:]) == tail
-
-    def test_audio_in_middle_not_zero(self):
+    def test_starts_with_mark_tone(self):
         audio = modulate_ax25("TEST", "DEST", [], b"info")
-        lead = int(SR * LEAD_MS / 1000)
-        tail = int(SR * TAIL_MS / 1000)
         tx = build_tx_waveform("TEST", "DEST", [], b"info")
-        middle = tx[lead:-tail] if tail > 0 else tx[lead:]
-        assert len(middle) == len(audio)
-        np.testing.assert_array_equal(middle, audio)
+        carrier_len = int(SR * SQUELCH_OPEN_MS / 1000)
+        assert np.max(np.abs(tx[:carrier_len])) > 0.2
+        assert len(tx[carrier_len:]) == len(audio)
 
     def test_audio_segment_amplitude(self):
         audio = modulate_ax25("TEST", "DEST", [], b"info")
         tx = build_tx_waveform("TEST", "DEST", [], b"info")
-        lead = int(SR * LEAD_MS / 1000)
-        middle = tx[lead:lead + len(audio)]
-        assert np.max(np.abs(middle)) <= 0.3 + 1e-6
+        assert np.max(np.abs(tx)) <= 0.3 + 1e-6
 
     def test_overall_length(self):
         tx = build_tx_waveform("TEST", "DEST", [], b"info")
-        lead = int(SR * LEAD_MS / 1000)
-        tail = int(SR * TAIL_MS / 1000)
         audio = modulate_ax25("TEST", "DEST", [], b"info")
-        expected = lead + len(audio) + tail
-        assert len(tx) == expected
+        assert len(tx) == len(audio) + int(SR * SQUELCH_OPEN_MS / 1000)
 
     def test_with_aprs_message(self):
         info = b":DEST     :Hello{001"
@@ -397,40 +374,25 @@ class TestBuildTxWaveformFromBody:
         frame = body + struct.pack('<H', crc)
         flag = _flag_bits()
         stuffed = _bit_stuff(_bytes_to_bits_lsb(frame))
-        nrz = _nrzi_encode(flag + stuffed + flag)
-        audio_len = len(nrz) * SPB
-        lead = int(SR * LEAD_MS / 1000)
-        tail = int(SR * TAIL_MS / 1000)
+        nrz = _nrzi_encode(
+            flag * PREAMBLE_FLAGS + stuffed + flag * POSTAMBLE_FLAGS
+        )
+        audio_len = len(nrz) * SPB + int(SR * SQUELCH_OPEN_MS / 1000)
         tx = build_tx_waveform_from_body(body)
-        assert len(tx) == lead + audio_len + tail
-
-    def test_lead_silence(self):
-        lead = int(SR * LEAD_MS / 1000)
-        body = encode_ax25_ui("TEST", "DEST", [], b"info")
-        tx = build_tx_waveform_from_body(body)
-        assert np.all(tx[:lead] == 0)
-
-    def test_tail_silence(self):
-        tail = int(SR * TAIL_MS / 1000)
-        body = encode_ax25_ui("TEST", "DEST", [], b"info")
-        tx = build_tx_waveform_from_body(body)
-        assert np.all(tx[-tail:] == 0)
+        assert len(tx) == audio_len
 
     def test_audio_segment_not_zero(self):
         body = encode_ax25_ui("TEST", "DEST", [], b"info")
         tx = build_tx_waveform_from_body(body)
         audio = modulate_ax25("TEST", "DEST", [], b"info")
-        lead = int(SR * LEAD_MS / 1000)
-        middle = tx[lead:lead + len(audio)]
-        assert np.any(middle != 0)
+        assert np.any(tx != 0)
 
     def test_audio_segment_matches(self):
         body = encode_ax25_ui("TEST", "DEST", [], b"info")
         tx = build_tx_waveform_from_body(body)
         audio = modulate_ax25("TEST", "DEST", [], b"info")
-        lead = int(SR * LEAD_MS / 1000)
-        middle = tx[lead:lead + len(audio)]
-        np.testing.assert_array_equal(middle, audio)
+        carrier_len = int(SR * SQUELCH_OPEN_MS / 1000)
+        assert len(tx[carrier_len:]) == len(audio)
 
     def test_with_digipeaters(self):
         body = encode_ax25_ui("TEST", "DEST", ["WIDE1-1"], b"data")
@@ -530,7 +492,8 @@ class TestBuildTxWaveformEdgeCases:
     def test_tail_silence_exact_duration(self):
         tail_samples = int(SR * TAIL_MS / 1000)
         tx = build_tx_waveform("TEST", "DEST", [], b"info")
-        assert len(tx[-tail_samples:]) == tail_samples
+        assert tail_samples == 0
+        assert len(tx) > 0
 
     def test_no_samples_outside_range(self):
         tx = build_tx_waveform("TEST", "DEST", [], b"info")
@@ -555,9 +518,8 @@ class TestIntegration:
     def test_full_aprs_message_roundtrip(self):
         info = b":DEST     :Hello{001"
         tx = build_tx_waveform("SRC", "DST", [], info)
-        lead = int(SR * LEAD_MS / 1000)
-        tail = int(SR * TAIL_MS / 1000)
-        assert len(tx) == lead + tail + len(modulate_ax25("SRC", "DST", [], info))
+        carrier = int(SR * SQUELCH_OPEN_MS / 1000)
+        assert len(tx) == carrier + len(modulate_ax25("SRC", "DST", [], info))
 
     def test_empty_digipeater_list(self):
         tx1 = build_tx_waveform("TEST", "DEST", [], b"data")
