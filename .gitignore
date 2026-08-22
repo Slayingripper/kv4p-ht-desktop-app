@@ -1,0 +1,26 @@
+# ── Python ──────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.so
+
+# ── Virtual environments ────────────────────────────────────
+.venv/
+venv/
+
+# ── Build artifacts (PyInstaller output) ────────────────────
+build/
+dist/
+
+# ── Test & tooling caches ───────────────────────────────────
+.pytest_cache/
+.coverage
+.ruff_cache/
+htmlcov/
+
+# ── Editors / OS ────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.lck
+~*

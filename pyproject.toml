@@ -1,0 +1,15 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+# BLE001/S110: I/O threads deliberately catch broad exceptions to keep
+# serial/audio/network loops alive. DTZ005: log timestamps are display-only.
+ignore = [
+    "BLE001",
+    "S110",
+    "DTZ005",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

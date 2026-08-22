@@ -1,0 +1,10 @@
+PyQt6>=6.5
+pyserial>=3.5
+sounddevice>=0.5
+opuslib>=3.0
+numpy>=1.25
+Pillow>=10.0
+scipy>=1.10
+pysstv>=0.5.9
+pytest>=7.0
+pytest-qt>=4.0
