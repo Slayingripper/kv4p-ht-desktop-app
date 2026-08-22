@@ -55,6 +55,7 @@ jobs:
           pyinstaller kv4p-ht.spec
 
       - name: Verify binary exists
+        shell: bash
         run: |
           if [ ! -f "dist/${{ matrix.binary }}" ]; then
             echo "ERROR: expected dist/${{ matrix.binary }} not found"
