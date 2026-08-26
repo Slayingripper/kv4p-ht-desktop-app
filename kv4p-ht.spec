@@ -4,14 +4,33 @@ PyInstaller spec for KV4P-Desktop.
 Build: pyinstaller kv4p-ht.spec
 """
 import sys
+import os
 from pathlib import Path
 
 block_cipher = None
 
+binaries = []
+if sys.platform == 'win32':
+    vendor_dir = Path('vendor')
+    for dll_name in ('opus.dll', 'libopus-0.dll'):
+        dll_path = vendor_dir / dll_name
+        if dll_path.exists():
+            binaries.append((str(dll_path), '.'))
+            break
+    else:
+        import ctypes.util
+        lib_path = ctypes.util.find_library('opus')
+        if lib_path:
+            binaries.append((lib_path, '.'))
+    for dll_name in os.environ.get('WIN_EXTRA_DLLS', '').split(os.pathsep):
+        dll_path = Path(dll_name.strip()) if dll_name.strip() else None
+        if dll_path and dll_path.is_file():
+            binaries.append((str(dll_path), '.'))
+
 a = Analysis(
     ['kv4p_ht/main.py'],
     pathex=[],
-    binaries=[],
+    binaries=binaries,
     datas=[],
     hiddenimports=[
         'opuslib',

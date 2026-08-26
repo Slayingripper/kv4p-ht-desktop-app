@@ -11,6 +11,7 @@ venv/
 # ── Build artifacts (PyInstaller output) ────────────────────
 build/
 dist/
+vendor/
 
 # ── Test & tooling caches ───────────────────────────────────
 .pytest_cache/
