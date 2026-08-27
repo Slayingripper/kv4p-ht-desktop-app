@@ -71,6 +71,15 @@ jobs:
             exit 1
           fi
 
+      - name: Verify Windows executable starts
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = & .\dist\kv4p-desktop.exe --version
+          if ($LASTEXITCODE -ne 0 -or $version -notmatch '^KV4P-Desktop v') {
+            throw "Windows executable failed its version smoke test: $version"
+          }
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
