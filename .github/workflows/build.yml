@@ -75,9 +75,17 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $version = & .\dist\kv4p-desktop.exe --version
-          if ($LASTEXITCODE -ne 0 -or $version -notmatch '^KV4P-Desktop v') {
-            throw "Windows executable failed its version smoke test: $version"
+          $process = Start-Process -FilePath .\dist\kv4p-desktop.exe -PassThru
+          try {
+            Start-Sleep -Seconds 3
+            $process.Refresh()
+            if ($process.HasExited) {
+              throw "Windows executable exited during its startup smoke test (exit code $($process.ExitCode))."
+            }
+          } finally {
+            if (-not $process.HasExited) {
+              Stop-Process -Id $process.Id -Force
+            }
           }
 
       - name: Upload artifact

@@ -14,7 +14,7 @@ from kv4p_ht.app import MainWindow
 
 def main():
     parser = argparse.ArgumentParser(description="KV4P-Desktop — Ham Radio App")
-    parser.add_argument('--version', action='version', version='KV4P-Desktop v0.1.4')
+    parser.add_argument('--version', action='version', version='KV4P-Desktop v0.1.5')
     parser.add_argument('--callsign', type=str, help="Default callsign")
     parser.add_argument('--freq', type=float, help="Initial RX frequency in MHz")
     parser.add_argument('--offset', type=float, help="Repeater offset in MHz")
